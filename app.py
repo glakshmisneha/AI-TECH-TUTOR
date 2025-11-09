@@ -17,26 +17,22 @@ DB_NAME = 'ds_tutor.db'
 PASSWORD_MIN_LENGTH = 8
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
-# NOTE: For deployment, the database should persist. Remove the line below
-# to prevent the database from being deleted on every app restart.
-# if os.path.exists(DB_NAME): os.remove(DB_NAME)
-
+# 🚨 IMPORTANT: Reading secrets from environment variables
 try:
-    # 🚨 CHANGE 1: Reading secrets from environment variables (GitHub/Render/Heroku)
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
     FLASK_SECRET_KEY = os.environ.get('SECRET_KEY', 'default_secret_key_if_none_set')
 
     if not GEMINI_API_KEY:
-        # Raise SystemExit for deployment platforms to catch as a failed startup
+        # In deployment, this error stops the service, flagging the missing key
+        print("❌ CONFIGURATION ERROR: GEMINI_API_KEY not found in environment variables.")
         raise SystemExit("Missing Environment Variable: GEMINI_API_KEY")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     MODEL = 'gemini-2.5-flash'
 
 except Exception as e:
-    # Print error for deployment logs
-    print(f"❌ CONFIGURATION ERROR: Failed to retrieve secrets or initialize client: {e}")
-    # In a deployment environment, we let the container stop on failure
+    # Log any other initialization error
+    print(f"❌ CONFIGURATION ERROR: Failed to initialize client: {e}")
     raise
 
 # ==============================================================================
@@ -44,6 +40,8 @@ except Exception as e:
 # ==============================================================================
 
 def init_db():
+    # SQLite is used here for simplicity, but for Vercel/production, this data is ephemeral.
+    # A persistent database (like PostgreSQL) is required for permanent data storage.
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -60,6 +58,7 @@ def init_db():
       )
     """)
 
+    # Insert test users if they don't exist
     c.execute("SELECT * FROM users WHERE email='user@ai.com'")
     if c.fetchone() is None:
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -93,7 +92,6 @@ def update_user_quiz_result(email, level, score, quiz_status):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("UPDATE users SET level=?, score=?, quiz_status=? WHERE email=?",
               (level, score, quiz_status, email))
-    # Reset lesson progress only if the user is moving to a *new* level
     if level != 'unassigned':
       c.execute("""
           INSERT INTO user_progress(email, level, lesson_index) VALUES(?,?,0)
@@ -134,17 +132,14 @@ def set_progress(email, level, index):
     """, (email, level, index))
     conn.commit(); conn.close()
 
-# Initialize the database and ensure default users exist
 init_db()
 
 # ==============================================================================
 # 3. Data Store, Quiz Answers, and Gemini Helpers - LEVEL-SPECIFIC QUIZ DATA
 # ==============================================================================
 
-# Initial 10-Question Quiz Answers (used for pre-assessment)
 QUIZ_ANSWERS = { "q1": "A", "q2": "B", "q3": "C", "q4": "A", "q5": "B", "q6": "C", "q7": "A", "q8": "B", "q9": "C", "q10": "A" }
 
-# Lessons
 LESSONS = {
     'easy': [
         {"title":"Arrays — Indexing, Access & Complexity", "url":"https://www.youtube.com/embed/QJNwK2uJyGs", "desc":"Intro to arrays: indexing, O(1) access."},
@@ -162,7 +157,6 @@ LESSONS = {
     ]
 }
 
-# Final Quiz Questions (Used for rendering FINAL_QUIZ_CONTENT)
 EASY_FINAL_QUIZ_QUESTIONS = {
     "q1": {"q":"What is the worst-case complexity for insertion into a full dynamic array?", "a":["O(1)", "O(log n)", "O(n)"], "opts":["O(1)", "O(log n)", "O(n)"], "correct": "O(n)"},
     "q2": {"q":"Which structure is best for implementing a 'Back' button history in an application?", "a":["Queue", "Linked List", "Stack"], "opts":["Queue", "Linked List", "Stack"], "correct": "Stack"},
@@ -212,11 +206,9 @@ ADVANCE_FINAL_QUIZ_QUESTIONS = {
     "q20": {"q":"The main advantage of using a Trie (Prefix Tree) is its efficiency in:", "a":["Sorting numbers", "String matching and searching", "Managing network routing"], "opts":["Sorting numbers", "String matching and searching", "Managing network routing"], "correct": "String matching and searching"},
 }
 
-# Helper to generate correct answers map from the full quiz definitions
 def create_answer_map(quiz_dict):
     return {q_num: data['correct'] for q_num, data in quiz_dict.items()}
 
-# Mapping the quiz content by level
 LEVEL_QUIZ_MAP = {
     'easy': {'questions': EASY_FINAL_QUIZ_QUESTIONS, 'total': len(EASY_FINAL_QUIZ_QUESTIONS), 'pass_threshold': 8, 'correct_answers': create_answer_map(EASY_FINAL_QUIZ_QUESTIONS)},
     'medium': {'questions': MEDIUM_FINAL_QUIZ_QUESTIONS, 'total': len(MEDIUM_FINAL_QUIZ_QUESTIONS), 'pass_threshold': 8, 'correct_answers': create_answer_map(MEDIUM_FINAL_QUIZ_QUESTIONS)},
@@ -241,10 +233,13 @@ def generate_video_summary(level, desc):
 # 4. Flask App and Templates Initialization 🌐
 # ==============================================================================
 
+# 🚨 IMPORTANT: The Flask instance must be named 'app' for Vercel/Gunicorn to find it.
 app = Flask(__name__)
-app.secret_key = FLASK_SECRET_KEY # 🚨 CHANGE 2: Using the environment variable key
+app.secret_key = FLASK_SECRET_KEY
 
-# THEME: NEON DARK WAVE (All HTML templates follow)
+# All HTML Template Strings are defined below (omitted for brevity here, but included
+# in the full file). The template rendering function remains the same.
+
 BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title><style>
 :root{--primary-dark:#1e143f;--secondary-dark:#2c1e55;--accent-pink:#ff3399;--accent-blue:#00ffff;--text-light:#e2e8f0;--ok:#22c55e;--warn:#dc2626;--muted:#94a3b8;}
 *{box-sizing:border-box}body{margin:0;background:var(--primary-dark);color:var(--text-light);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
@@ -656,6 +651,7 @@ LESSON_CONTENT = r"""{% extends 'DASHBOARD_HTML' %}{% block main_content %}
       <h3 style="margin-bottom: 10px; color: var(--accent-pink);">🤖 AI Doubt Chat</h3>
       <div id="chat-window" style="height:650px;overflow:auto;padding-right: 8px;">
         <div class="bubble ai">Welcome to the AI Doubt Chat! Ask anything about the current lesson.</div>
+        <div class="bubble ai">Simulated voice command is now a simple button for web deployment.</div>
       </div>
       <div class="row" style="margin-top:15px">
         <input id="chat-input" class="input" placeholder="Ask a question about the lesson...">
@@ -805,7 +801,6 @@ def signup():
         email = request.form.get('email', '').strip()
         password = request.form.get('password', '')
 
-        # Basic server-side validation (Client-side validation is done via JS/AJAX)
         if not re.fullmatch(EMAIL_REGEX, email):
               error = "Invalid email format."
         elif len(password) < PASSWORD_MIN_LENGTH or not (re.search(r'[A-Z]', password) and re.search(r'[a-z]', password) and re.search(r'\d', password)):
@@ -814,11 +809,10 @@ def signup():
             hashed_password = generate_password_hash(password)
 
             if add_new_user(email, hashed_password, name):
-                # SUCCESS: Auto-login the new user
                 session['user_email'] = email
                 return redirect(url_for('dashboard', page='home'))
             else:
-                error = "This email address is already registered." # Redundant due to AJAX but kept for safety
+                error = "This email address is already registered."
 
     return render_template('SIGNUP_HTML', error=error)
 
@@ -839,7 +833,6 @@ def dashboard(page):
         session.pop('user_email', None)
         return redirect(url_for('login'))
 
-    # Common data
     current_level = user_data.get('level', 'unassigned')
     quiz_status = user_data.get('quiz_status', 'pending_pre')
 
@@ -849,29 +842,23 @@ def dashboard(page):
     total_lessons_for_progress = max(1, total_lessons)
     progress_percent = round((completed_lessons_count / total_lessons_for_progress) * 100)
 
-    # Determine the current final quiz details
     current_quiz_map = LEVEL_QUIZ_MAP.get(current_level, {})
     quiz_total_questions = current_quiz_map.get('total', 20)
 
     # --- Flow Control ---
     if quiz_status == 'completed_advance' and page not in ['course-complete', 'scoreboard']:
-      # If user is a Master, redirect to the completion page unless they are trying to view the scoreboard
       return redirect(url_for('dashboard', page='course-complete'))
-
 
     is_quiz_done = current_level != 'unassigned'
     if page == 'ds-quiz' and is_quiz_done:
-      # If pre-quiz is done, user shouldn't be on the pre-quiz page.
       if quiz_status == 'pending_pre': return redirect(url_for('dashboard', page='ds-result'))
       else: return redirect(url_for('dashboard', page='home'))
 
-    # Final Quiz Gating Logic: Lessons finished -> quiz SHOULD open automatically
     if current_level != 'unassigned':
-      if completed_lessons_index < total_lessons: # Lessons NOT finished
+      if completed_lessons_index < total_lessons:
           if page == 'ds-final-quiz' or page == 'ds-final-result':
-              # Send user back to current lesson index (continue)
               return redirect(url_for('dashboard', page='ds-lesson', i=completed_lessons_index))
-      else: # Lessons ARE finished (index == total_lessons)
+      else:
           if page not in ['ds-final-quiz', 'ds-final-result', 'course-complete', 'scoreboard']:
               return redirect(url_for('dashboard', page='ds-final-quiz'))
 
@@ -879,14 +866,11 @@ def dashboard(page):
     if request.method == 'POST':
         action = request.form.get('action')
 
-        # 1. Pre-Assessment Quiz (10 Questions)
         if action == 'submit_pre_quiz':
             if quiz_status != 'pending_pre': return redirect(url_for('dashboard', page='home'))
-
             score = 0
             for i in range(1, 11):
-                if request.form.get(f'q{i}') == QUIZ_ANSWERS[f'q{i}']:
-                    score += 1
+                if request.form.get(f'q{i}') == QUIZ_ANSWERS[f'q{i}']: score += 1
 
             if score >= 8: new_level = 'advance'
             elif score >= 5: new_level = 'medium'
@@ -895,22 +879,18 @@ def dashboard(page):
             update_user_quiz_result(user_email, new_level, score, 'completed_pre')
             return redirect(url_for('dashboard', page='ds-result'))
 
-        # 2. Final Level Quiz (Dynamically graded)
         elif action == 'submit_final_quiz':
             quiz_questions_map = LEVEL_QUIZ_MAP.get(current_level)
             if not quiz_questions_map: return redirect(url_for('dashboard', page='home'))
-
             correct_answers = quiz_questions_map['correct_answers']
             total_questions = quiz_questions_map['total']
             pass_threshold = quiz_questions_map['pass_threshold']
 
             score = 0
             for q_num, correct_ans in correct_answers.items():
-                if request.form.get(q_num) == correct_ans:
-                    score += 1
+                if request.form.get(q_num) == correct_ans: score += 1
 
             promoted = score >= pass_threshold
-
             next_level_map = {'easy': 'medium', 'medium': 'advance', 'advance': 'completed_advance'}
             new_level = current_level
             new_status = f'completed_{current_level}'
@@ -919,25 +899,20 @@ def dashboard(page):
                 if current_level == 'advance':
                     new_status = 'completed_advance'
                     update_user_quiz_result(user_email, current_level, score, new_status)
-                    # Course Completion Redirect
                     return redirect(url_for('dashboard', page='course-complete', score=score))
                 else:
                     new_level = next_level_map.get(current_level)
-                    # For successful promotion, update level to the next, set progress to 0 in the new level
                     update_user_quiz_result(user_email, new_level, score, new_status)
             else:
-                # Quiz failed, user remains at current_level. Reset progress to 0 for review.
                 update_user_quiz_result(user_email, current_level, score, new_status)
-                set_progress(user_email, current_level, 0) # Force review start
+                set_progress(user_email, current_level, 0)
 
-            # Pass total_questions and pass_threshold to the result page for accurate display
             return redirect(url_for('dashboard', page='ds-final-result', score=score, promoted=promoted,
                                     new_level=new_level, current_level=current_level, total_questions=total_questions))
 
     user_data = get_user_by_email(user_email)
 
     # --- Route Page Rendering ---
-
     if page == 'home':
         return render_template('HOME_CONTENT', page=page, user=user_data, level=current_level,
                                completed=completed_lessons_count, total=total_lessons_for_progress,
@@ -951,25 +926,18 @@ def dashboard(page):
         all_users = get_all_users_by_score()
         return render_template('SCOREBOARD_CONTENT', page=page, user=user_data, all_users=all_users)
     elif page == 'ds-quiz':
-        if quiz_status == 'pending_pre': return render_template('QUIZ_CONTENT', page=page, user=user_data, level=current_level)
-        else: return redirect(url_for('dashboard', page='home'))
+        return render_template('QUIZ_CONTENT', page=page, user=user_data, level=current_level)
     elif page == 'ds-result':
-        # Check if the user is now assigned a level, otherwise redirect to home
-        if current_level == 'unassigned': return redirect(url_for('dashboard', page='home'))
         return render_template('RESULT_CONTENT', page=page, user=user_data, level=current_level)
-
     elif page == 'ds-final-quiz':
-        # Re-check to enforce the lesson completion rule (already done at top)
         quiz_data = LEVEL_QUIZ_MAP.get(current_level)
         return render_template('FINAL_QUIZ_CONTENT', page=page, user=user_data, level=current_level, quiz_data=quiz_data)
-
     elif page == 'ds-final-result':
         score = request.args.get('score', type=int, default=0)
         promoted = request.args.get('promoted', default='False') == 'True'
         new_level = request.args.get('new_level')
         current_level_param = request.args.get('current_level')
         total_questions = request.args.get('total_questions', type=int, default=20)
-        # pass threshold for failure message
         pass_threshold = LEVEL_QUIZ_MAP.get(current_level_param, {}).get('pass_threshold', 8)
 
         return render_template('FINAL_QUIZ_RESULT_CONTENT', page=page, user=user_data, score=score, promoted=promoted,
@@ -977,7 +945,6 @@ def dashboard(page):
                                pass_threshold=pass_threshold)
 
     elif page == 'course-complete':
-        if quiz_status != 'completed_advance': return redirect(url_for('dashboard', page='home'))
         score = request.args.get('score', type=int, default=user_data.get('score', 0))
         return render_template('COURSE_COMPLETE_CONTENT', page=page, user=user_data, score=score)
 
@@ -988,26 +955,15 @@ def dashboard(page):
         q_i = request.args.get('i', type=int)
         cur_i = get_progress(user_email, current_level)
 
-        # REDIRECTION CHECK: If current index equals total lessons, redirect to quiz
-        if cur_i >= total_lessons:
-             return redirect(url_for('dashboard', page='ds-final-quiz'))
+        if cur_i >= total_lessons: return redirect(url_for('dashboard', page='ds-final-quiz'))
 
         if q_i is not None:
-             # Limit navigation: Cannot jump past the total number of lessons
              new_i = max(0, min(total_lessons, q_i))
+             if new_i > cur_i: set_progress(user_email, current_level, new_i); cur_i = new_i
+             else: cur_i = new_i
 
-             # Safe progress update: Only update if moving forward or finishing
-             if new_i > cur_i:
-                 set_progress(user_email, current_level, new_i)
-                 cur_i = new_i
-             else:
-                 cur_i = new_i
+        if cur_i == total_lessons: return redirect(url_for('dashboard', page='ds-final-quiz'))
 
-        # After updating, check if progress is now at the 'finished' state
-        if cur_i == total_lessons:
-             return redirect(url_for('dashboard', page='ds-final-quiz'))
-
-        # Use the actual index to retrieve the lesson
         completed_lessons_index = get_progress(user_email, current_level)
         lesson = lessons[completed_lessons_index]
 
@@ -1016,7 +972,6 @@ def dashboard(page):
 
         def make_url(i): return url_for('dashboard', page='ds-lesson') + '?' + urlencode({'i': i})
         prev_url = '#' if prev_disabled else make_url(completed_lessons_index - 1)
-        # Next URL for the last lesson correctly points to the index == total_lessons (the finish state)
         next_url = make_url(completed_lessons_index + 1)
 
         completed_lessons_count_display = completed_lessons_index + 1
@@ -1029,7 +984,7 @@ def dashboard(page):
             index=completed_lessons_index, total_lessons=total_lessons, lesson_title=lesson['title'],
             video_url=lesson['url'], lesson_desc=lesson['desc'], summary=summary,
             prev_url=prev_url, next_url=next_url, prev_disabled=prev_disabled,
-            next_disabled=False, # Next button is always enabled until they complete the last lesson
+            next_disabled=False,
             completed_lessons=completed_lessons_count_display,
             lesson_progress_percent=lesson_progress_percent,
             is_last_lesson=is_last_lesson
@@ -1071,13 +1026,12 @@ def chat_response():
         return jsonify({'response': 'An unknown error occurred during chat processing.'})
 
 # ==============================================================================
-# 7. Server Run Block (Production Ready) 🚀
+# 7. Server Run Block (Local Testing Only) 🖥️
 # ==============================================================================
 
 if __name__ == '__main__':
-    # This block is for local testing only. Deployment platforms (like Render/Heroku)
-    # will run the app using 'gunicorn app:app' (from the Procfile) which handles the port.
+    # This block is used only when running the file directly (e.g., python app.py)
+    # in your local development environment.
     print("Running Flask app locally for testing...")
-    # Get port from environment or default to 5000
-    port = int(os.environ.get('PORT', 5000)) 
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
