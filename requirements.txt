@@ -1,0 +1,6 @@
+flask
+gunicorn # Standard WSGI server for production
+google-genai
+jinja2
+werkzeug
+sqlite3 # Built-in, but good to list
