@@ -1,5 +1,4 @@
 flask
-gunicorn
 google-genai
 jinja2
 werkzeug
