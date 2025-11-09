@@ -8,30 +8,32 @@ from jinja2 import DictLoader, Environment
 from werkzeug.security import generate_password_hash, check_password_hash
 from google import genai
 from google.genai.errors import APIError
+import secrets
 
 # ==============================================================================
 # 1. Configuration and Security Setup (Env Vars and DB) 🔒
 # ==============================================================================
 
-DB_NAME = 'ds_tutor.db'
+# 🚨 CRITICAL FIX FOR VERCEL: Point DB to the writable /tmp directory
+DB_NAME = os.path.join('/tmp', 'ds_tutor.db') 
+
 PASSWORD_MIN_LENGTH = 8
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
-# 🚨 IMPORTANT: Reading secrets from environment variables
+# Reading secrets from environment variables (Vercel/Render)
 try:
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-    FLASK_SECRET_KEY = os.environ.get('SECRET_KEY', 'default_secret_key_if_none_set')
+    FLASK_SECRET_KEY = os.environ.get('SECRET_KEY')
 
-    if not GEMINI_API_KEY:
-        # In deployment, this error stops the service, flagging the missing key
-        print("❌ CONFIGURATION ERROR: GEMINI_API_KEY not found in environment variables.")
-        raise SystemExit("Missing Environment Variable: GEMINI_API_KEY")
+    if not GEMINI_API_KEY or not FLASK_SECRET_KEY:
+        # This will raise a SystemExit, which causes the FUNCTION_INVOCATION_FAILED if keys are missing
+        print("❌ CONFIGURATION ERROR: GEMINI_API_KEY or SECRET_KEY not found in environment variables.")
+        raise SystemExit("Missing Environment Variable: GEMINI_API_KEY or SECRET_KEY")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     MODEL = 'gemini-2.5-flash'
 
 except Exception as e:
-    # Log any other initialization error
     print(f"❌ CONFIGURATION ERROR: Failed to initialize client: {e}")
     raise
 
@@ -40,8 +42,7 @@ except Exception as e:
 # ==============================================================================
 
 def init_db():
-    # SQLite is used here for simplicity, but for Vercel/production, this data is ephemeral.
-    # A persistent database (like PostgreSQL) is required for permanent data storage.
+    # Note: This database is ephemeral on Vercel and will reset after inactivity.
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -58,7 +59,6 @@ def init_db():
       )
     """)
 
-    # Insert test users if they don't exist
     c.execute("SELECT * FROM users WHERE email='user@ai.com'")
     if c.fetchone() is None:
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -132,6 +132,7 @@ def set_progress(email, level, index):
     """, (email, level, index))
     conn.commit(); conn.close()
 
+# The database initialization must happen before the Flask app starts routing requests
 init_db()
 
 # ==============================================================================
@@ -233,12 +234,10 @@ def generate_video_summary(level, desc):
 # 4. Flask App and Templates Initialization 🌐
 # ==============================================================================
 
-# 🚨 IMPORTANT: The Flask instance must be named 'app' for Vercel/Gunicorn to find it.
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
-# All HTML Template Strings are defined below (omitted for brevity here, but included
-# in the full file). The template rendering function remains the same.
+# All HTML Template Strings (omitted for brevity here, but included in the final copy)
 
 BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title><style>
 :root{--primary-dark:#1e143f;--secondary-dark:#2c1e55;--accent-pink:#ff3399;--accent-blue:#00ffff;--text-light:#e2e8f0;--ok:#22c55e;--warn:#dc2626;--muted:#94a3b8;}
@@ -1030,8 +1029,7 @@ def chat_response():
 # ==============================================================================
 
 if __name__ == '__main__':
-    # This block is used only when running the file directly (e.g., python app.py)
-    # in your local development environment.
+    # This block is used only for local development (python app.py)
     print("Running Flask app locally for testing...")
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
