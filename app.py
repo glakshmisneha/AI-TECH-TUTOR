@@ -14,7 +14,8 @@ import secrets
 # 1. Configuration and Security Setup (Env Vars and DB) 🔒
 # ==============================================================================
 
-# 🚨 CRITICAL FIX FOR VERCEL: Point DB to the writable /tmp directory
+# 🚨 CRITICAL FIX FOR VERCEL/SERVERLESS: Point DB to the writable /tmp directory
+# This ensures file permissions don't crash the function on startup.
 DB_NAME = os.path.join('/tmp', 'ds_tutor.db') 
 
 PASSWORD_MIN_LENGTH = 8
@@ -59,6 +60,7 @@ def init_db():
       )
     """)
 
+    # Insert test users if they don't exist
     c.execute("SELECT * FROM users WHERE email='user@ai.com'")
     if c.fetchone() is None:
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -69,6 +71,9 @@ def init_db():
                   ('bob@test.com', generate_password_hash('pass123'), 'Bob Johnson', 'advance', 9, 'completed_medium'))
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
                   ('chloe@test.com', generate_password_hash('pass123'), 'Chloe Lee', 'easy', 3, 'completed_pre'))
+        
+        # Ensure database is writable by adding a temporary progress entry
+        c.execute("INSERT OR IGNORE INTO user_progress(email,level,lesson_index) VALUES(?, 'easy', 0)", ('chloe@test.com',))
 
     conn.commit()
     conn.close()
@@ -132,7 +137,7 @@ def set_progress(email, level, index):
     """, (email, level, index))
     conn.commit(); conn.close()
 
-# The database initialization must happen before the Flask app starts routing requests
+# Initialize the database, which is crucial for Vercel startup
 init_db()
 
 # ==============================================================================
@@ -237,7 +242,7 @@ def generate_video_summary(level, desc):
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
-# All HTML Template Strings (omitted for brevity here, but included in the final copy)
+# All HTML Template Strings (Full Content)
 
 BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title><style>
 :root{--primary-dark:#1e143f;--secondary-dark:#2c1e55;--accent-pink:#ff3399;--accent-blue:#00ffff;--text-light:#e2e8f0;--ok:#22c55e;--warn:#dc2626;--muted:#94a3b8;}
