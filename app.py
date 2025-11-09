@@ -14,7 +14,8 @@ import secrets
 # 1. Configuration and Security Setup (Env Vars and DB) 🔒
 # ==============================================================================
 
-# CRITICAL FIX FOR VERCEL/SERVERLESS: Point DB to the writable /tmp directory
+# 🚨 CRITICAL FIX FOR VERCEL/SERVERLESS: Point DB to the writable /tmp directory
+# This ensures file permissions don't crash the function on startup.
 DB_NAME = os.path.join('/tmp', 'ds_tutor.db') 
 
 PASSWORD_MIN_LENGTH = 8
@@ -26,6 +27,7 @@ try:
     FLASK_SECRET_KEY = os.environ.get('SECRET_KEY')
 
     if not GEMINI_API_KEY or not FLASK_SECRET_KEY:
+        # This will raise a SystemExit, which causes the FUNCTION_INVOCATION_FAILED if keys are missing
         print("❌ CONFIGURATION ERROR: GEMINI_API_KEY or SECRET_KEY not found in environment variables.")
         raise SystemExit("Missing Environment Variable: GEMINI_API_KEY or SECRET_KEY")
 
@@ -41,6 +43,7 @@ except Exception as e:
 # ==============================================================================
 
 def init_db():
+    # Note: This database is ephemeral on Vercel and will reset after inactivity.
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -57,6 +60,7 @@ def init_db():
       )
     """)
 
+    # Insert test users if they don't exist
     c.execute("SELECT * FROM users WHERE email='user@ai.com'")
     if c.fetchone() is None:
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -133,6 +137,7 @@ def set_progress(email, level, index):
     """, (email, level, index))
     conn.commit(); conn.close()
 
+# Initialize the database, which is crucial for Vercel startup
 init_db()
 
 # ==============================================================================
@@ -237,14 +242,53 @@ def generate_video_summary(level, desc):
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
-# BASE_HTML is now minimal, linking to the external stylesheet
-BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head><body>{% block content %}{% endblock %}</body></html>
+# All HTML Template Strings (Full Content)
+
+BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title><style>
+:root{--primary-dark:#1e143f;--secondary-dark:#2c1e55;--accent-pink:#ff3399;--accent-blue:#00ffff;--text-light:#e2e8f0;--ok:#22c55e;--warn:#dc2626;--muted:#94a3b8;}
+*{box-sizing:border-box}body{margin:0;background:var(--primary-dark);color:var(--text-light);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
+h1,h2,h3{margin:0 0 .5rem}a{color:var(--accent-pink);text-decoration:none}
+.container{display:flex;min-height:100vh}
+.sidebar{width:260px;background:var(--primary-dark);color:var(--text-light);display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.1);}
+.sidebar h2{padding:20px;font-size:1.4rem;border-bottom:1px solid rgba(255,255,255,0.1);}
+.nav a{display:block;padding:14px 20px;color:var(--muted);font-weight:500;}
+.nav a.active,.nav a:hover{background:var(--secondary-dark);color:var(--text-light);border-left:4px solid var(--accent-pink)}
+.content{flex:1;padding:32px;background:var(--secondary-dark);}
+.card{background:rgba(255,255,255,0.05);border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.3);padding:24px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.1);}
+.btn{display:inline-block;background:var(--accent-pink);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;transition:.2s;box-shadow:0 0 10px rgba(255,51,153,0.5);}
+.btn:hover{background:#d32b80;transform:translateY(-1px);box-shadow:0 0 15px rgba(255,51,153,0.7);}
+.btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none;}
+.input{width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.3);border-radius:6px;background:rgba(0,0,0,0.2);color:var(--text-light);font-size:1rem;}
+.input::placeholder{color:rgba(255,255,255,0.5);}
+.input:focus{outline:none;border-color:var(--accent-blue);box-shadow:0 0 8px rgba(0,255,255,0.5);}
+.row{display:flex;gap:10px;align-items:center;}
+.error{color:var(--warn);font-size:.9rem;font-weight:500;}
+.hint{color:var(--muted);font-size:.9rem;}
+.progress{background:rgba(255,255,255,0.1);border-radius:10px;height:12px;overflow:hidden}
+.progress>div{height:100%;background:var(--ok)}
+.chat{border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:16px;background:rgba(0,0,0,0.2);box-shadow:0 4px 10px rgba(0,0,0,.3);}
+.bubble{padding:10px 14px;border-radius:16px;max-width:85%;box-shadow:0 1px 3px rgba(0,0,0,.15);margin-bottom:10px;font-size:0.95rem;}
+.bubble.user{background:var(--accent-pink);color:#fff;margin-left:auto;border-bottom-right-radius:4px}
+.bubble.ai{background:#2c1e55;color:var(--text-light);border-bottom-left-radius:4px;border: 1px solid rgba(255,255,255,0.1);}
+.badge{font-size:.75rem;color:var(--accent-blue);font-weight:600;}
+</style></head><body>{% block content %}{% endblock %}</body></html>
 """
 
-# Remaining templates are now clean of the huge inline <style> blocks
 LOGIN_HTML = r"""{% extends 'BASE_HTML' %}{% block content %}
+<style>
+    .login-container{display:flex;height:100vh;max-width:1400px;margin:0 auto;}
+    .login-form-wrapper{width:35%;max-width:400px;padding:50px;display:flex;flex-direction:column;justify-content:center;color:var(--text-light);background:var(--primary-dark);}
+    .login-visual-area{flex:1;background:var(--secondary-dark);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+    .login-title{font-size:2.5rem;font-weight:700;color:var(--text-light);margin-bottom:10px;}
+    .input-group{margin-bottom:15px;position:relative;}
+    .input-icon{position:absolute;top:10px;left:12px;color:var(--muted);font-size:1.1rem;z-index:10;}
+    .input{padding-left:35px !important; color:var(--text-light);}
+    .input::placeholder{color:rgba(255,255,255,0.5);}
+    .form-header{text-align:center;margin-bottom:50px;}
+    .form-header svg{width:80px;height:80px;color:var(--accent-pink);margin-bottom:15px;}
+    .visual-wave-text{color:var(--text-light);font-size:4rem;font-weight:800;}
+    .wave-bg{position:absolute;width:100%;height:100%;background:radial-gradient(circle at 70% 30%, rgba(255, 51, 153, 0.4) 0%, transparent 20%), radial-gradient(circle at 40% 60%, rgba(0, 255, 255, 0.4) 0%, transparent 20%); filter: blur(50px);}
+</style>
 <div class="login-container">
     <div class="login-form-wrapper">
         <div class="form-header">
@@ -292,6 +336,23 @@ LOGIN_HTML = r"""{% extends 'BASE_HTML' %}{% block content %}
 {% endblock %}"""
 
 SIGNUP_HTML = r"""{% extends 'BASE_HTML' %}{% block content %}
+<style>
+    .signup-container{display:flex;height:100vh;max-width:1400px;margin:0 auto;}
+    .signup-form-wrapper{width:35%;max-width:400px;padding:50px;display:flex;flex-direction:column;justify-content:center;color:var(--text-light);background:var(--primary-dark);}
+    .signup-visual-area{flex:1;background:var(--secondary-dark);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+    .signup-title{font-size:1.6rem;font-weight:700;color:var(--text-light);margin-bottom:10px;}
+    .input-group{margin-bottom:15px;position:relative;}
+    .input-icon{position:absolute;top:10px;left:12px;color:var(--muted);font-size:1.1rem;z-index:10;}
+    .input{padding-left:35px !important; color:var(--text-light);}
+    .input::placeholder{color:rgba(255,255,255,0.5);}
+    .form-header{text-align:center;margin-bottom:40px;}
+    .form-header svg{width:60px;height:60px;color:var(--accent-blue);margin-bottom:10px;}
+    .visual-wave-text{color:var(--text-light);font-size:3rem;font-weight:800; text-align: center;}
+    .wave-bg{position:absolute;width:100%;height:100%;background:radial-gradient(circle at 20% 80%, rgba(255, 51, 153, 0.4) 0%, transparent 20%), radial-gradient(circle at 60% 30%, rgba(0, 255, 255, 0.4) 0%, transparent 20%); filter: blur(50px);}
+    #email-feedback { font-size: 0.85rem; margin-top: 5px; }
+    .status-ok { color: var(--ok); }
+    .status-error { color: var(--warn); }
+</style>
 <div class="signup-container">
     <div class="signup-form-wrapper">
         <div class="form-header">
