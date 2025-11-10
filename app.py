@@ -7,6 +7,10 @@ from jinja2 import DictLoader, Environment
 from werkzeug.security import generate_password_hash, check_password_hash
 from google import genai
 from google.genai.errors import APIError
+from dotenv import load_dotenv # Import for local development
+
+# Load environment variables from .env file (for local development only)
+load_dotenv()
 
 # Import local modules
 from db_manager import (
@@ -18,22 +22,26 @@ from data_config import (
     EMAIL_REGEX, PASSWORD_MIN_LENGTH, MODEL
 )
 
+# --- Configuration (Reads from Environment) ---
+FLASK_SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'default_secret_key_change_me')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+FLASK_ENV = os.environ.get('FLASK_ENV', 'production') # Default to production mode
+
 # Initialize Flask App
 app = Flask(__name__)
-# IMPORTANT: In a real deployment, set a strong SECRET_KEY using os.environ
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'default_secret_key_change_me')
+app.secret_key = FLASK_SECRET_KEY
+app.config['ENV'] = FLASK_ENV
+app.config['DEBUG'] = (FLASK_ENV == 'development')
 
 # Initialize Gemini Client
-try:
-    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-    if GEMINI_API_KEY:
+client = None
+if GEMINI_API_KEY:
+    try:
         client = genai.Client(api_key=GEMINI_API_KEY)
-    else:
-        client = None
-        print("⚠️ WARNING: GEMINI_API_KEY not set in environment. AI features will be disabled.")
-except Exception as e:
-    client = None
-    print(f"❌ Gemini client initialization failed: {e}. AI features disabled.")
+    except Exception as e:
+        print(f"❌ Gemini client initialization failed: {e}. AI features disabled.")
+else:
+    print("⚠️ WARNING: GEMINI_API_KEY not set. AI features will be disabled.")
 
 
 # --- Template Rendering Helper ---
@@ -68,7 +76,6 @@ def generate_video_summary(level, desc):
 
 @app.route('/api/check_email')
 def api_check_email():
-    """API endpoint for real-time email existence check during signup."""
     email = request.args.get('email','').strip()
     exists = bool(get_user_by_email(email))
     return jsonify({'exists': exists})
@@ -166,36 +173,28 @@ def dashboard(page):
     if request.method == 'POST':
         action = request.form.get('action')
 
-        # 1. Pre-Assessment Quiz (10 Questions)
         if action == 'submit_pre_quiz':
             if quiz_status != 'pending_pre': return redirect(url_for('dashboard', page='home'))
-
             score = 0
             for i in range(1, 11):
                 if request.form.get(f'q{i}') == QUIZ_ANSWERS[f'q{i}']:
                     score += 1
-
             if score >= 8: new_level = 'advance'
             elif score >= 5: new_level = 'medium'
             else: new_level = 'easy'
-
             update_user_quiz_result(user_email, new_level, score, 'completed_pre')
             return redirect(url_for('dashboard', page='ds-result'))
 
-        # 2. Final Level Quiz (Dynamically graded)
         elif action == 'submit_final_quiz':
             quiz_questions_map = LEVEL_QUIZ_MAP.get(current_level)
             if not quiz_questions_map: return redirect(url_for('dashboard', page='home'))
-
             correct_answers = quiz_questions_map['correct_answers']
             total_questions = quiz_questions_map['total']
             pass_threshold = quiz_questions_map['pass_threshold']
-
             score = 0
             for q_num, correct_ans in correct_answers.items():
                 if request.form.get(q_num) == correct_ans:
                     score += 1
-
             promoted = score >= pass_threshold
             next_level_map = {'easy': 'medium', 'medium': 'advance', 'advance': 'completed_advance'}
             new_level = current_level
@@ -211,7 +210,7 @@ def dashboard(page):
                     update_user_quiz_result(user_email, new_level, score, new_status)
             else:
                 update_user_quiz_result(user_email, current_level, score, new_status)
-                set_progress(user_email, current_level, 0) # Force review start
+                set_progress(user_email, current_level, 0)
 
             return redirect(url_for('dashboard', page='ds-final-result', score=score, promoted=promoted,
                                      new_level=new_level, current_level=current_level, total_questions=total_questions))
@@ -224,7 +223,6 @@ def dashboard(page):
                                completed=completed_lessons_count, total=total_lessons_for_progress,
                                progress_percent=progress_percent, quiz_status=quiz_status,
                                quiz_total_questions=quiz_total_questions)
-    # ... (other pages logic)
     elif page == 'subjects':
         return render_template('SUBJECTS_CONTENT', page=page, user=user_data, level=current_level,
                                completed=completed_lessons_count, total=total_lessons_for_progress,
@@ -341,3 +339,14 @@ def chat_response():
         return jsonify({'response': 'Sorry, the AI service is currently unavailable.'})
     except Exception:
         return jsonify({'response': 'An unknown error occurred during chat processing.'})
+
+# ==============================================================================
+# 7. Server Run Block (Local Only)
+# ==============================================================================
+
+# This block is used for local testing and development. 
+# Gunicorn will handle the production startup on Render.
+if __name__ == '__main__':
+    print("Running in local development mode. Set FLASK_ENV=production for deployment.")
+    # The default port 5000 is used here.
+    app.run(host='0.0.0.0', port=5000)
