@@ -1,5 +1,5 @@
-from werkzeug.security import generate_password_hash, check_password_hash
-
+import re
+from jinja2 import DictLoader, Environment
 # --- Configuration Constants ---
 PASSWORD_MIN_LENGTH = 8
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -83,9 +83,7 @@ LEVEL_QUIZ_MAP = {
     'advance': {'questions': ADVANCE_FINAL_QUIZ_QUESTIONS, 'total': len(ADVANCE_FINAL_QUIZ_QUESTIONS), 'pass_threshold': 16, 'correct_answers': create_answer_map(ADVANCE_FINAL_QUIZ_QUESTIONS)},
 }
 
-# --- HTML Templates (using raw strings for embedding) ---
-# NOTE: In a professional project, these would be separate files in a `templates/` folder.
-# We keep them here as raw strings per the original code to preserve the Jinja2 DictLoader approach.
+# --- HTML Templates (Kept as raw strings for DictLoader) ---
 BASE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI TECH TUTOR</title><style>
 :root{--primary-dark:#1e143f;--secondary-dark:#2c1e55;--accent-pink:#ff3399;--accent-blue:#00ffff;--text-light:#e2e8f0;--ok:#22c55e;--warn:#dc2626;--muted:#94a3b8;}
 *{box-sizing:border-box}body{margin:0;background:var(--primary-dark);color:var(--text-light);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
