@@ -4,7 +4,12 @@ import os
 
 DB_NAME = 'ds_tutor.db'
 
+# --- Initialization & Utility ---
+
 def init_db():
+    # Only create the database file if it doesn't exist.
+    # We skip the user population for production deployment's first run 
+    # but keep the table creation logic.
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -21,7 +26,7 @@ def init_db():
       )
     """)
 
-    # Seed test users if they don't exist
+    # --- Seed Test Users (for initial local setup) ---
     c.execute("SELECT * FROM users WHERE email='user@ai.com'")
     if c.fetchone() is None:
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -32,9 +37,16 @@ def init_db():
                   ('bob@test.com', generate_password_hash('pass123'), 'Bob Johnson', 'advance', 9, 'completed_medium'))
         c.execute("INSERT INTO users (email, password, name, level, score, quiz_status) VALUES (?, ?, ?, ?, ?, ?)",
                   ('chloe@test.com', generate_password_hash('pass123'), 'Chloe Lee', 'easy', 3, 'completed_pre'))
+    # -------------------------------------------------
 
     conn.commit()
     conn.close()
+
+# Initialize the database file
+if not os.path.exists(DB_NAME):
+    init_db()
+
+# --- CRUD Functions ---
 
 def get_user_by_email(email):
     conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row
@@ -94,7 +106,3 @@ def set_progress(email, level, index):
       ON CONFLICT(email,level) DO UPDATE SET lesson_index=excluded.lesson_index
     """, (email, level, index))
     conn.commit(); conn.close()
-
-# Initialize the database file
-if not os.path.exists(DB_NAME):
-    init_db()
