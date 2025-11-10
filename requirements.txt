@@ -1,5 +1,6 @@
 flask
 google-genai
-pyngrok
 Werkzeug
 Jinja2
+python-dotenv  # For loading .env file locally
+gunicorn
