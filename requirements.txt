@@ -1,4 +1,5 @@
 flask
 google-genai
-jinja2
-werkzeug
+pyngrok
+Werkzeug
+Jinja2
