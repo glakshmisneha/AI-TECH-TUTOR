@@ -34,4 +34,4 @@ Ensure your repository contains the following files in the root directory:
 ds-tutor-app/
 ├── app.py              # Main Flask application
 ├── requirements.txt    # Python dependencies
-└── vercel.json         # (Optional, recommended for Vercel) Routing configuration
+
